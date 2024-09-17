@@ -1,0 +1,288 @@
+import { ReactNode, useEffect, useRef, useState } from "react";
+import { z } from "zod";
+import * as XLSX from "xlsx";
+
+interface ExcelRow {
+  [key: string]: string | number | boolean;
+}
+
+const schema = z.object({
+  stone_type: z.string(),
+  material: z.string(),
+  no_block: z.string(),
+  bundle: z.string().optional(),
+  no_lot: z.string(),
+  thickness: z.string(),
+  finishing: z.string(),
+  no_slab: z.string(),
+  accounting_sku: z.string(),
+  buy_width: z.string(),
+  buy_height: z.string(),
+  sell_width: z.string().optional(),
+  sell_height: z.string().optional(),
+  arrival_date: z.string(),
+  price_type: z.string(),
+  cost: z.string(),
+  transport: z.string(),
+});
+
+function App() {
+  const [showImport, setShowImport] = useState(false);
+
+  function trimObjectKeys(obj: Record<string, any>): Record<string, any> {
+    return Object.keys(obj).reduce((acc, key) => {
+      const trimmedKey = key.trim();
+      acc[trimmedKey] = obj[key];
+      return acc;
+    }, {} as Record<string, any>);
+  }
+
+  const formatKey = (key: string): string => {
+    return key
+      .replace(/\(OPTIONAL\)/gi, "")
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/#/g, "no")
+      .toLowerCase();
+  };
+
+  const handleFileImport = (file: File): void => {
+    const reader = new FileReader();
+    const fileType = file.name.split(".").pop()?.toLowerCase();
+    reader.onload = (event: ProgressEvent<FileReader>) => {
+      let workbook: XLSX.WorkBook;
+      if (fileType === "csv") {
+        const csvData = event.target?.result as string;
+        workbook = XLSX.read(csvData, { type: "string" });
+      } else {
+        const data = new Uint8Array(event.target?.result as ArrayBuffer);
+        workbook = XLSX.read(data, { type: "array" });
+      }
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+
+      let jsonData: ExcelRow[] = XLSX.utils.sheet_to_json(worksheet, {
+        defval: "",
+      });
+
+      const headers: string[] = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+      })[0] as string[];
+
+      jsonData = jsonData.map((row: ExcelRow) => {
+        const trimmedRow = trimObjectKeys(row);
+        const formattedRow: ExcelRow = {};
+        headers.forEach((header) => {
+          const formattedKey = formatKey(header);
+          formattedRow[formattedKey] =
+            trimmedRow[header] !== undefined ? trimmedRow[header] : "";
+        });
+        return formattedRow;
+      });
+      console.log("This is all the data: ", jsonData);
+    };
+    if (fileType === "csv") {
+      reader.readAsText(file);
+    } else {
+      reader.readAsArrayBuffer(file);
+    }
+  };
+
+  return (
+    <main className="bg-green-100 w-screen h-screen flex justify-center items-center">
+      <button
+        onClick={() => setShowImport((prev) => !prev)}
+        className="w-28 h-12 bg-red-500 rounded-md font-semibold"
+      >
+        Open Modal
+      </button>
+
+      {showImport && (
+        <ImportExcelModal
+          showImport={showImport}
+          setShowImport={setShowImport}
+          onFile={(file: File): void => {
+            if (file) {
+              handleFileImport(file);
+              setShowImport(false);
+            }
+          }}
+        />
+      )}
+      {/* {showSelectSheet && (
+        <SelectSheetModal
+          sheetNames={sheetNames}
+          handleSheetSelection={handleSheetSelection}
+          setShowSelectSheet={setShowSelectSheet}
+          isOpen={showSelectSheet}
+        />
+      )} */}
+    </main>
+  );
+}
+
+function SelectSheetModal({
+  isOpen,
+  sheetNames,
+  handleSheetSelection,
+  setShowSelectSheet,
+}: {
+  isOpen: boolean;
+  sheetNames: string[];
+  handleSheetSelection: (sheetName: string) => void;
+  setShowSelectSheet: any;
+}) {
+  if (!isOpen) return <></>;
+  return (
+    <Modal showModal={isOpen}>
+      <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
+        <h2 className="text-xl font-bold mb-4 text-black">
+          Selecciona una hoja
+        </h2>
+        <ul className="mb-4">
+          {sheetNames.map((name) => (
+            <li
+              key={name}
+              onClick={() => {
+                handleSheetSelection(name);
+                setShowSelectSheet(false);
+              }}
+              className="cursor-pointer p-2 hover:bg-gray-200 rounded transition text-black"
+            >
+              {name}
+            </li>
+          ))}
+        </ul>
+        <button
+          onClick={() => setShowSelectSheet(false)}
+          className="bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600 transition"
+        >
+          Cerrar
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function ImportExcelModal({
+  showImport,
+  setShowImport,
+  onFile,
+}: {
+  showImport: boolean;
+  setShowImport: any;
+  onFile: (file: File) => void;
+}) {
+  const drop = useRef<HTMLDivElement>(null);
+  const [onDropOver, setOnDropOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    drop?.current?.addEventListener("dragover", handleDragOver);
+    drop?.current?.addEventListener("drop", handleDrop);
+
+    return () => {
+      drop?.current?.removeEventListener("dragover", handleDragOver);
+      drop?.current?.removeEventListener("drop", handleDrop);
+    };
+  }, []);
+
+  const handleDragOver = (e: any) => {
+    setOnDropOver(true);
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: any) => {
+    setOnDropOver(false);
+    e.preventDefault();
+    e.stopPropagation();
+    const files = [...e.dataTransfer.files];
+    if (files.length > 1) {
+      return;
+    }
+    onFile(files[0]);
+  };
+
+  const handleInput = (e: any) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.target.files;
+    if (files && files.length === 1) {
+      onFile(files[0]);
+    }
+  };
+
+  return (
+    <Modal showModal={showImport}>
+      <article className="w-2/3  bg-white rounded-md p-7">
+        <section className="w-full flex flex-col gap-2 items-center relative">
+          <span
+            className="absolute -top-5 -right-5 text-red-500 cursor-pointer z-40"
+            onClick={() => setShowImport((prev: boolean) => !prev)}
+          >
+            X
+          </span>
+
+          <div
+            onClick={() => {}}
+            ref={drop}
+            className={`relative flex h-full w-full flex-col flex-nowrap items-center justify-center rounded-md border ${
+              onDropOver ? "bg-[#e3e9fb]" : "bg-transparent"
+            } p-12`}
+            style={{
+              borderColor: "#eeeef0",
+            }}
+          >
+            <input
+              multiple={false}
+              onChange={handleInput}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              ref={inputRef}
+              className="pointer-events-none absolute bottom-0 left-0 right-0 top-0 h-full w-full opacity-0"
+            />
+            <span className="mt-1 text-sm font-semibold text-slate-700">
+              Drag your image to start uploading
+            </span>
+            <div className="my-3 flex items-center gap-2">
+              <div className="h-px w-20 bg-slate-200" />
+              <span className="text-xs text-slate-400">OR</span>
+              <div className="h-px w-20 bg-slate-200" />
+            </div>
+            <div className="peer">
+              <button
+                className="h-9 hover:cursor-pointer bg-blue-400 rounded-md px-3"
+                onClick={() => {
+                  if (inputRef.current) inputRef.current.value = "";
+                  inputRef.current?.click();
+                }}
+              >
+                <span className="text-sm text-white font-semibold">
+                  Browse image
+                </span>
+              </button>
+            </div>
+          </div>
+        </section>
+      </article>
+    </Modal>
+  );
+}
+
+function Modal({
+  showModal,
+  children,
+}: {
+  showModal: boolean;
+  children: ReactNode;
+}) {
+  if (!showModal) return <></>;
+  return (
+    <article className="absolute inset-0 w-screen h-screen bg-black/50 flex items-center justify-center">
+      {children}
+    </article>
+  );
+}
+
+export default App;
