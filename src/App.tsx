@@ -1,23 +1,20 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import * as XLSX from "xlsx";
 
-interface ExcelRow {
-  [key: string]: string | number | boolean;
-}
-
 const schema = z.object({
   stone_type: z.string(),
   material: z.string(),
-  no_block: z.string(),
-  bundle: z.string().optional(),
-  no_lot: z.string(),
+  block_no: z.string(),
+  bundle: z.number().optional(),
+  lot_no: z.string(),
   thickness: z.string(),
   finishing: z.string(),
-  no_slab: z.string(),
+  slab_no: z.number(),
   accounting_sku: z.string(),
-  buy_width: z.string(),
-  buy_height: z.string(),
+  buy_width: z.number(),
+  buy_height: z.number(),
   sell_width: z.string().optional(),
   sell_height: z.string().optional(),
   arrival_date: z.string(),
@@ -26,17 +23,33 @@ const schema = z.object({
   transport: z.string(),
 });
 
+type SchemaType = z.infer<typeof schema>;
+
+interface RowData extends SchemaType {
+  errors?: z.ZodIssue[];
+}
+
 function App() {
   const [showImport, setShowImport] = useState(false);
+  const [rowsWithErrors, setRowsWithErrors] = useState<RowData[]>();
+  const [validRows, setValidRows] = useState<RowData[]>();
 
+  /**
+   * Esta función lo que hace es quitarle los espacios al principio y al final
+   *  que puedan tener las keys de la data
+   */
   function trimObjectKeys(obj: Record<string, any>): Record<string, any> {
     return Object.keys(obj).reduce((acc, key) => {
-      const trimmedKey = key.trim();
+      const trimmedKey = key.trim().trim();
       acc[trimmedKey] = obj[key];
       return acc;
     }, {} as Record<string, any>);
   }
 
+  /**
+   * Esta función es la encargada de convertir las keys.
+   * Por ejemplo: "SLAB #" a "slab_no"
+   */
   const formatKey = (key: string): string => {
     return key
       .replace(/\(OPTIONAL\)/gi, "")
@@ -46,6 +59,10 @@ function App() {
       .toLowerCase();
   };
 
+  /**
+   * Esta función es la encargada de obtener los datos del excel y validarlos
+   * para luego agregarlos a los estados de los rows validos y con error
+   */
   const handleFileImport = (file: File): void => {
     const reader = new FileReader();
     const fileType = file.name.split(".").pop()?.toLowerCase();
@@ -58,10 +75,12 @@ function App() {
         const data = new Uint8Array(event.target?.result as ArrayBuffer);
         workbook = XLSX.read(data, { type: "array" });
       }
+
+      //TODO: hacer que se abra un modal cuando esté en este paso para seleccionar la sheet
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
 
-      let jsonData: ExcelRow[] = XLSX.utils.sheet_to_json(worksheet, {
+      let jsonData: Record<any, any>[] = XLSX.utils.sheet_to_json(worksheet, {
         defval: "",
       });
 
@@ -69,15 +88,31 @@ function App() {
         header: 1,
       })[0] as string[];
 
-      jsonData = jsonData.map((row: ExcelRow) => {
+      jsonData = jsonData.map((row: any) => {
         const trimmedRow = trimObjectKeys(row);
-        const formattedRow: ExcelRow = {};
+        const formattedRow: Record<any, any> = {};
         headers.forEach((header) => {
-          const formattedKey = formatKey(header);
+          const timmedHeader = header.trim();
+          const formattedKey = formatKey(timmedHeader);
           formattedRow[formattedKey] =
-            trimmedRow[header] !== undefined ? trimmedRow[header] : "";
+            trimmedRow[timmedHeader] !== undefined
+              ? trimmedRow[timmedHeader]
+              : "";
         });
         return formattedRow;
+      });
+      jsonData.forEach((e) => {
+        const value = e as SchemaType;
+        const result = schema.safeParse(value);
+        if (!result.success) {
+          setRowsWithErrors((prev) => [
+            ...(prev ?? []),
+            { ...value, errors: result.error.errors },
+          ]);
+        } else {
+          setValidRows((prev) => [...(prev ?? []), value]);
+          console.log("Validación exitosa:", result.data);
+        }
       });
       console.log("This is all the data: ", jsonData);
     };
@@ -118,49 +153,6 @@ function App() {
         />
       )} */}
     </main>
-  );
-}
-
-function SelectSheetModal({
-  isOpen,
-  sheetNames,
-  handleSheetSelection,
-  setShowSelectSheet,
-}: {
-  isOpen: boolean;
-  sheetNames: string[];
-  handleSheetSelection: (sheetName: string) => void;
-  setShowSelectSheet: any;
-}) {
-  if (!isOpen) return <></>;
-  return (
-    <Modal showModal={isOpen}>
-      <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
-        <h2 className="text-xl font-bold mb-4 text-black">
-          Selecciona una hoja
-        </h2>
-        <ul className="mb-4">
-          {sheetNames.map((name) => (
-            <li
-              key={name}
-              onClick={() => {
-                handleSheetSelection(name);
-                setShowSelectSheet(false);
-              }}
-              className="cursor-pointer p-2 hover:bg-gray-200 rounded transition text-black"
-            >
-              {name}
-            </li>
-          ))}
-        </ul>
-        <button
-          onClick={() => setShowSelectSheet(false)}
-          className="bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600 transition"
-        >
-          Cerrar
-        </button>
-      </div>
-    </Modal>
   );
 }
 
